@@ -20,7 +20,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir flask requests selenium
 
 ENV PYTHONUNBUFFERED=1
 
