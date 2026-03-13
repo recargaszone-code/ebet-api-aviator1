@@ -13,7 +13,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from webdriver_manager.chrome import ChromeDriverManager
 
 app = Flask(__name__)
 
@@ -33,9 +32,7 @@ historico = []
 
 
 def enviar_telegram(msg):
-
     try:
-
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             data={
@@ -44,6 +41,25 @@ def enviar_telegram(msg):
                 "parse_mode": "Markdown"
             },
             timeout=15
+        )
+    except:
+        pass
+
+
+def enviar_print(driver, legenda="Screenshot"):
+    try:
+
+        path = "/tmp/print.png"
+
+        driver.save_screenshot(path)
+
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
+            files={"photo": open(path, "rb")},
+            data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "caption": legenda
+            }
         )
 
     except:
@@ -89,7 +105,7 @@ def iniciar_scraper():
 
         try:
 
-            enviar_telegram("🟢 Iniciando TXUNA BET Aviator...")
+            enviar_telegram("🟢 Iniciando EBET Aviator...")
 
             chrome_options = Options()
 
@@ -97,12 +113,11 @@ def iniciar_scraper():
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
-
             chrome_options.add_argument("--window-size=1366,768")
 
-            service = Service(
-                ChromeDriverManager().install()
-            )
+            chrome_options.binary_location = "/usr/bin/chromium"
+
+            service = Service("/usr/bin/chromedriver")
 
             driver = webdriver.Chrome(
                 service=service,
@@ -111,17 +126,19 @@ def iniciar_scraper():
 
             wait = WebDriverWait(driver, 60)
 
-            # ================= SITE =================
+            # ================= ABRIR SITE =================
 
             driver.get(URL)
 
             time.sleep(6)
 
-            # ================= AVIATOR =================
+            enviar_print(driver, "Página aberta")
+
+            # ================= ABRIR AVIATOR =================
 
             clicar_aviator(driver, wait)
 
-            time.sleep(4)
+            time.sleep(5)
 
             # ================= LOGIN =================
 
@@ -147,10 +164,13 @@ def iniciar_scraper():
             )
 
             driver.execute_script(
-                "arguments[0].click();", login_btn
+                "arguments[0].click();",
+                login_btn
             )
 
             time.sleep(8)
+
+            enviar_print(driver, "Login realizado")
 
             # ================= ABRIR JOGO =================
 
@@ -158,12 +178,9 @@ def iniciar_scraper():
 
             time.sleep(8)
 
-            # ================= NOVA ABA =================
-
             abas = driver.window_handles
 
             if len(abas) > 1:
-
                 driver.switch_to.window(abas[-1])
 
             # ================= IFRAME EXTERNO =================
@@ -190,15 +207,13 @@ def iniciar_scraper():
 
             time.sleep(10)
 
-            # ================= ESPERAR HISTÓRICO =================
+            enviar_telegram("🚀 Aviator conectado!")
 
             wait.until(
                 EC.presence_of_element_located(
                     (By.CSS_SELECTOR, "div.payout")
                 )
             )
-
-            enviar_telegram("🚀 Aviator conectado!")
 
             # ================= LOOP =================
 
@@ -221,7 +236,6 @@ def iniciar_scraper():
                     )
 
                     if match:
-
                         novos.append(
                             float(match.group(1))
                         )
@@ -236,11 +250,11 @@ def iniciar_scraper():
                     )
 
                     enviar_telegram(
-                        f"""📊 *TXUNA BET AVIATOR*
+                        f"""📊 EBET AVIATOR
 
 [{lista}]
 
-Último: *{historico[0]:.2f}x*"""
+Último: {historico[0]:.2f}x"""
                     )
 
                 time.sleep(6)
@@ -251,15 +265,13 @@ def iniciar_scraper():
                 f"🔥 ERRO: {type(e).__name__}"
             )
 
-            time.sleep(15)
+            time.sleep(20)
 
         finally:
 
             try:
-
                 if driver:
                     driver.quit()
-
             except:
                 pass
 
@@ -269,7 +281,6 @@ def iniciar_scraper():
 
 @app.route("/api/history")
 def api_history():
-
     return jsonify(historico)
 
 
@@ -277,7 +288,6 @@ def api_history():
 def api_last():
 
     if historico:
-
         return jsonify(historico[0])
 
     return jsonify(None)
@@ -285,8 +295,7 @@ def api_last():
 
 @app.route("/")
 def home():
-
-    return "TXUNA BET AVIATOR BOT ONLINE"
+    return "EBET AVIATOR BOT ONLINE"
 
 
 # ================= START =================
