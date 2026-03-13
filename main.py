@@ -10,7 +10,6 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 
 app = Flask(__name__)
 
@@ -26,17 +25,22 @@ URL = "https://ebet.co.mz/games/go/spribe?id=aviator"
 
 historico = []
 
-
 # ================= TELEGRAM =================
 
 
 def enviar_telegram(msg):
+
     try:
+
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": msg},
+            data={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": msg
+            },
             timeout=15
         )
+
     except:
         pass
 
@@ -92,8 +96,6 @@ def iniciar_scraper():
                 service=service,
                 options=chrome_options
             )
-
-            wait = WebDriverWait(driver, 30)
 
             print("Abrindo URL:", URL)
 
@@ -159,7 +161,17 @@ def iniciar_scraper():
 
             print("Entrou no iframe interno Spribe")
 
-            time.sleep(12)
+            # ================= ESPERAR HISTÓRICO =================
+
+            payouts = []
+
+            while len(payouts) == 0:
+
+                payouts = driver.find_elements(By.CSS_SELECTOR, "div.payouts-block div.payout")
+
+                print("Payouts encontrados:", len(payouts))
+
+                time.sleep(2)
 
             enviar_telegram("🚀 Aviator conectado!")
 
@@ -167,7 +179,7 @@ def iniciar_scraper():
 
             while True:
 
-                elements = driver.find_elements(By.CSS_SELECTOR, "div.payout")
+                elements = driver.find_elements(By.CSS_SELECTOR, "div.payouts-block div.payout")
 
                 novos = []
 
@@ -218,6 +230,7 @@ def iniciar_scraper():
 
 @app.route("/api/history")
 def api_history():
+
     return jsonify(historico)
 
 
@@ -232,6 +245,7 @@ def api_last():
 
 @app.route("/")
 def home():
+
     return "EBET AVIATOR BOT ONLINE"
 
 
@@ -245,6 +259,6 @@ if __name__ == "__main__":
         daemon=True
     ).start()
 
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8080))
 
     app.run(host="0.0.0.0", port=port)
