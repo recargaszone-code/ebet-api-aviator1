@@ -30,7 +30,7 @@ URL = "https://ebet.co.mz/games/go/spribe?id=aviator"
 # ====================================================
 
 historico = []           # snapshot atual (para detectar mudança)
-global_history = []      # ← NOVO: acumula os últimos 50 (novo no topo, remove o mais antigo)
+global_history = []      # acumula os últimos 50 (novo no topo, remove o mais antigo)
 _last_telegram = 0
 
 
@@ -134,8 +134,11 @@ def iniciar_scraper():
 
     while True:
         driver = None
+        falhas_consecutivas = 0
+        MAX_FALHAS = 6
+
         try:
-            send_telegram_text("🟢 Iniciando EBET Aviator (modo protegido + histórico 50)...")
+            send_telegram_text("🟢 Iniciando EBET Aviator (histórico 50 + anti-rate-limit reforçado)...")
 
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
@@ -156,11 +159,11 @@ def iniciar_scraper():
             wait = WebDriverWait(driver, 30)
 
             driver.get(URL)
-            time.sleep(6)
+            time.sleep(8)
             screenshot_and_send(driver, "Página inicial aberta")
 
             click_aviator_if_found(driver)
-            time.sleep(2)
+            time.sleep(3)
 
             # Login
             try:
@@ -176,11 +179,11 @@ def iniciar_scraper():
             except NoSuchElementException:
                 pass
             except StaleElementReferenceException:
-                time.sleep(2)
+                time.sleep(3)
 
-            time.sleep(6)
+            time.sleep(8)
             click_aviator_if_found(driver)
-            time.sleep(4)
+            time.sleep(5)
 
             # Trocar aba se necessário
             handles = driver.window_handles
@@ -196,7 +199,7 @@ def iniciar_scraper():
                     break
             if iframe1:
                 driver.switch_to.frame(iframe1)
-                time.sleep(2)
+                time.sleep(3)
 
             iframe2 = None
             for f in driver.find_elements(By.TAG_NAME, "iframe"):
@@ -206,16 +209,21 @@ def iniciar_scraper():
                     break
             if iframe2:
                 driver.switch_to.frame(iframe2)
-                time.sleep(3)
+                time.sleep(4)
 
             # Aguarda payouts
             total_wait_start = time.time()
             while True:
                 if page_shows_rate_limit(driver):
-                    sleep_time = min(max_backoff, backoff) + random.uniform(0.2, 1.2)
-                    send_telegram_text(f"⚠️ Rate limit detectado. Dormindo {int(sleep_time)}s")
+                    falhas_consecutivas += 1
+                    sleep_time = min(max_backoff, backoff) + random.uniform(5, 15)
+                    send_telegram_text(f"⚠️ Rate limit detectado ({falhas_consecutivas}/{MAX_FALHAS}) — dormindo {int(sleep_time)}s")
                     time.sleep(sleep_time)
-                    backoff = min(max_backoff, backoff * 2)
+                    backoff = min(max_backoff, backoff * 1.6)
+
+                    if falhas_consecutivas >= MAX_FALHAS:
+                        raise RuntimeError("Rate limit persistente após várias tentativas")
+
                     try:
                         driver.switch_to.default_content()
                     except:
@@ -226,42 +234,52 @@ def iniciar_scraper():
                 if payouts and len(payouts) > 0:
                     break
 
-                if time.time() - total_wait_start > 90:
-                    send_telegram_text("⚠️ Ainda sem payouts depois de 90s...")
+                if time.time() - total_wait_start > 120:
+                    send_telegram_text("⚠️ Ainda sem payouts após 120s...")
                     time.sleep(min(max_backoff, backoff))
                     backoff = min(max_backoff, backoff * 2)
                     total_wait_start = time.time()
 
-                time.sleep(2)
+                time.sleep(3)
 
             backoff = base_backoff
+            falhas_consecutivas = 0
             send_telegram_text("🚀 EBET Aviator conectado (payouts detectados).")
             screenshot_and_send(driver, "Dentro do jogo (payouts detectados)")
 
-            # Inicializa ambos os históricos
+            # Inicializa históricos
             historico = coletar_historico_dom(driver)
-            global_history = historico[:]   # começa com os atuais
+            global_history = historico[:]
 
-            # LOOP DE MONITORAMENTO
+            # LOOP DE MONITORAMENTO - mais lento e robusto
             while True:
-                if page_shows_rate_limit(driver):
-                    sleep_time = min(max_backoff, backoff) + random.uniform(0.2, 1.2)
-                    send_telegram_text(f"Rate limit detectado no loop — dormindo {int(sleep_time)}s")
-                    time.sleep(sleep_time)
-                    continue
-
                 try:
+                    if page_shows_rate_limit(driver):
+                        falhas_consecutivas += 1
+                        sleep_time = min(max_backoff, backoff) + random.uniform(5, 15)
+                        send_telegram_text(f"Rate limit detectado no loop ({falhas_consecutivas}/{MAX_FALHAS}) — dormindo {int(sleep_time)}s")
+                        time.sleep(sleep_time)
+                        backoff = min(max_backoff, backoff * 1.6)
+
+                        if falhas_consecutivas >= MAX_FALHAS:
+                            send_telegram_text("🔄 Excesso de rate limit → reiniciando navegador")
+                            raise RuntimeError("Rate limit persistente")
+
+                        continue
+
+                    falhas_consecutivas = 0
+                    backoff = base_backoff
+
                     novos = coletar_historico_dom(driver)
 
-                    # DETECTA NOVO VALOR E ATUALIZA O ACUMULADOR DE 50
                     if novos and (not historico or novos[0] != historico[0]):
                         added = False
                         for v in novos:
                             if v not in global_history:
-                                global_history.insert(0, v)   # novo no topo
+                                global_history.insert(0, v)
                                 added = True
                         if len(global_history) > 50:
-                            global_history = global_history[:50]   # remove o mais antigo
+                            global_history = global_history[:50]
 
                         if added:
                             lista = ", ".join(f"{v:.2f}x" for v in global_history[:20])
@@ -269,22 +287,24 @@ def iniciar_scraper():
                                 f"📊 **EBET AVIATOR - ÚLTIMOS 50**\n\n[{lista}]\n\nÚltimo: *{global_history[0]:.2f}x*",
                                 throttle_seconds=10
                             )
-                            if random.random() < 0.6:
-                                screenshot_and_send(driver, "Histórico atualizado (50)")
+                            if random.random() < 0.5:
+                                screenshot_and_send(driver, "Histórico atualizado")
 
                         historico = novos[:]
 
-                except StaleElementReferenceException:
-                    time.sleep(1)
-                except WebDriverException as e:
-                    send_telegram_text(f"⚠️ WebDriverException no monitor loop: {e}")
-                    break
+                    time.sleep(15 + random.uniform(5, 10))  # polling mais humano
 
-                time.sleep(5 + random.uniform(0, 2))
+                except (StaleElementReferenceException, WebDriverException) as e:
+                    falhas_consecutivas += 1
+                    send_telegram_text(f"⚠️ Erro Selenium ({falhas_consecutivas}/{MAX_FALHAS}): {type(e).__name__}")
+                    if falhas_consecutivas >= MAX_FALHAS:
+                        raise
+                    time.sleep(10 + random.uniform(0, 8))
+                    continue
 
         except Exception as e:
-            sleep_time = min(max_backoff, backoff) + random.uniform(1, 3)
-            send_telegram_text(f"🔥 ERRO SCRAPER: {type(e).__name__} → reiniciando em {int(sleep_time)}s")
+            sleep_time = min(max_backoff, backoff) + random.uniform(5, 15)
+            send_telegram_text(f"🔥 ERRO: {type(e).__name__} → reiniciando em {int(sleep_time)}s")
             time.sleep(sleep_time)
             backoff = min(max_backoff, backoff * 2)
 
@@ -294,12 +314,12 @@ def iniciar_scraper():
                     driver.quit()
             except:
                 pass
-            time.sleep(3)
+            time.sleep(5)
 
 
 @app.route("/api/history")
 def api_history():
-    return jsonify(global_history)   # ← retorna os últimos 50 acumulados
+    return jsonify(global_history)
 
 
 @app.route("/api/last")
