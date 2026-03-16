@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - EBET Aviator + IFRAME CORRIGIDO (bitville + spribe) + LOGS COMPLETOS
+# main.py - EBET Aviator + FLUXO EXATO QUE VOCÊ MANDA + LOGS NO CONSOLE
 
 import os
 import sys
@@ -24,7 +24,7 @@ TELEGRAM_TOKEN = "8742776802:AAHSzD1qTwCqMEOdoW9_pT2l5GfmMBWUZQY"
 TELEGRAM_CHAT_ID = "7427648935"
 PHONE = "857789345"
 PASSWORD = "max123ZICO"
-URL = "https://ebet.co.mz/games/go/spribe?id=aviator"
+HOME_URL = "https://ebet.co.mz/"
 
 app = Flask(__name__)
 
@@ -69,15 +69,14 @@ def safe_find_elements(driver, selector):
             time.sleep(0.4)
     return []
 
-def click_aviator_if_found(driver):
+def click_aviator_image(driver):
     print("   Procurando imagem do Aviator...")
     for img in safe_find_elements(driver, "img.landing-page__item-image"):
         try:
             src = (img.get_attribute("src") or "").lower()
-            alt = (img.get_attribute("alt") or "").lower()
-            if "aviator" in src or "aviator" in alt:
+            if "aviator" in src:
                 driver.execute_script("arguments[0].click();", img)
-                print("   ✅ Clique no Aviator executado!")
+                print("   ✅ Clique na imagem Aviator executado!")
                 return True
         except:
             continue
@@ -126,48 +125,48 @@ def iniciar_scraper():
             print_step("INICIANDO NOVO CICLO")
             driver = start_driver()
 
-            print_step("1 - Abrindo URL")
-            driver.get(URL)
+            print_step("1 - Abrindo Home EBET")
+            driver.get(HOME_URL)
             time.sleep(8)
-            screenshot_and_send(driver, "Página inicial")
+            screenshot_and_send(driver, "Home EBET aberta")
 
-            print_step("2 - Clicando Aviator")
-            click_aviator_if_found(driver)
-            time.sleep(4)
+            print_step("2 - Clicando Aviator (primeira vez)")
+            click_aviator_image(driver)
+            time.sleep(5)
 
-            print_step("3 - Tentando Login")
+            print_step("3 - Fazendo Login")
             try:
                 phone = driver.find_element(By.ID, "phone-input")
+                phone.clear()
                 phone.send_keys(PHONE)
                 password = driver.find_element(By.ID, "password-input")
+                password.clear()
                 password.send_keys(PASSWORD)
-                btn = driver.find_element(By.CSS_SELECTOR, "input.btn-session")
+                btn = driver.find_element(By.CSS_SELECTOR, "input.btn.btn-primary.btn-session")
                 driver.execute_script("arguments[0].click();", btn)
                 screenshot_and_send(driver, "Login enviado")
                 print("✅ Login enviado com sucesso")
-            except:
-                print("⚠️ Login já feito ou campos não encontrados")
+            except Exception as e:
+                print("⚠️ Erro no login:", e)
 
             time.sleep(8)
 
-            print_step("4 - Procurando e entrando no iframe (bitville + spribe)")
-            if len(driver.window_handles) > 1:
-                driver.switch_to.window(driver.window_handles[-1])
-                print("✅ Trocou para nova aba")
+            print_step("4 - Clicando Aviator novamente (segunda vez)")
+            click_aviator_image(driver)
+            time.sleep(6)
 
+            print_step("5 - Entrando no iframe Spribe / Bitville")
             iframe_el = None
-            print("   Buscando iframe Spribe / Bitville...")
             for f in driver.find_elements(By.TAG_NAME, "iframe"):
                 try:
                     src = (f.get_attribute("src") or "").lower()
                     class_name = (f.get_attribute("class") or "").lower()
                     id_name = (f.get_attribute("id") or "").lower()
-                    print(f"   Candidato: id={id_name} | class={class_name} | src={src[:90]}...")
+                    print(f"   Candidato iframe → id={id_name} | class={class_name} | src={src[:100]}...")
 
-                    if ("launch.spribegaming.com" in src or 
+                    if ("bitville-api.com" in src or 
+                        "launch.spribegaming.com" in src or 
                         "aviator-next.spribegaming.com" in src or 
-                        "games-interface.bitville-api.com" in src or 
-                        "spribe" in src or 
                         "spribe-iframe" in class_name or 
                         "game-iframe" in class_name or 
                         "provider-game-iframe" in id_name):
@@ -181,26 +180,17 @@ def iniciar_scraper():
                 driver.switch_to.frame(iframe_el)
                 print("✅ Entrou no iframe com sucesso!")
             else:
-                print("❌ Nenhum iframe encontrado após 1 tentativa")
-                raise RuntimeError("Iframe não localizado")
+                raise RuntimeError("Iframe não encontrado")
 
-            print_step("5 - Aguardando payouts (com logs a cada tentativa)")
+            print_step("6 - Aguardando e capturando histórico")
             start_time = time.time()
-            attempt = 0
-            while time.time() - start_time < 120:
-                attempt += 1
+            while time.time() - start_time < 90:
                 payouts = safe_find_elements(driver, "div.payouts-block div.payout, div.payout")
-                print(f"   Tentativa {attempt} → {len(payouts)} payouts encontrados")
-
+                print(f"   Tentativa → {len(payouts)} payouts encontrados")
                 if len(payouts) > 0:
-                    print("✅ PAYOUTS ENCONTRADOS!")
                     break
-                if page_shows_rate_limit(driver):
-                    print("⚠️ Rate limit detectado")
-                    time.sleep(10)
                 time.sleep(4)
 
-            print_step("6 - Coletando histórico inicial")
             historico = coletar_historico_dom(driver)
             with _history_lock:
                 global_history = historico[:]
@@ -209,12 +199,8 @@ def iniciar_scraper():
             # LOOP PRINCIPAL
             while True:
                 print_step("LOOP - Verificando novo histórico")
-                if page_shows_rate_limit(driver):
-                    print("⚠️ RATE LIMIT no loop")
-                    time.sleep(backoff + random.uniform(5, 15))
-                    continue
-
                 novos = coletar_historico_dom(driver)
+
                 if novos and (not historico or novos[0] != historico[0]):
                     print(f"🔄 NOVO HISTÓRICO! Último: {novos[0]:.2f}x")
                     with _history_lock:
@@ -229,7 +215,7 @@ def iniciar_scraper():
                     screenshot_and_send(driver, "Histórico atualizado")
                     historico = novos[:]
 
-                print("⏳ Aguardando próxima checagem (15-25s)...")
+                print("⏳ Aguardando próxima verificação (15-25s)...")
                 time.sleep(15 + random.uniform(5, 10))
 
         except Exception as e:
@@ -265,7 +251,7 @@ def api_history():
 
 @app.route("/")
 def home():
-    return "EBET AVIATOR - IFRAME CORRIGIDO (bitville + spribe)"
+    return "EBET AVIATOR - FLUXO EXATO CORRIGIDO"
 
 if __name__ == "__main__":
     threading.Thread(target=supervisor_thread, daemon=True).start()
