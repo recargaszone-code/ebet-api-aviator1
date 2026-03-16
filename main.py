@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - EBET Aviator + LOGS NO CONSOLE + HISTÓRICO 50 + Supervisor
+# main.py - EBET Aviator + LOGS NO CONSOLE + IFRAME CORRIGIDO + HISTÓRICO 50
 
 import os
 import sys
@@ -60,9 +60,9 @@ def screenshot_and_send(driver, label):
         pass
 
 def print_step(step):
-    print(f"\n{'='*70}")
+    print(f"\n{'='*80}")
     print(f"🚀 PASSO: {step}")
-    print(f"{'='*70}")
+    print(f"{'='*80}")
     send_telegram_text(f"📍 {step}")
 
 def safe_find_elements(driver, selector):
@@ -73,8 +73,8 @@ def safe_find_elements(driver, selector):
             time.sleep(0.3)
     return []
 
-def click_aviator_if_found(driver):   # ← FUNÇÃO QUE FALTAVA
-    print("   Procurando imagem do Aviator...")
+def click_aviator_if_found(driver):
+    print("   Procurando imagem do Aviator na página...")
     for img in safe_find_elements(driver, "img.landing-page__item-image"):
         try:
             src = (img.get_attribute("src") or "").lower()
@@ -90,7 +90,7 @@ def click_aviator_if_found(driver):   # ← FUNÇÃO QUE FALTAVA
 
 def coletar_historico_dom(driver):
     vals = []
-    for el in safe_find_elements(driver, "div.payouts-block div.payout"):
+    for el in safe_find_elements(driver, "div.payouts-block div.payout, div.payout"):
         try:
             m = re.search(r"(\d+\.?\d*)", el.text.strip())
             if m:
@@ -150,46 +150,75 @@ def iniciar_scraper():
                 screenshot_and_send(driver, "Login enviado")
                 print("✅ Login enviado com sucesso")
             except:
-                print("⚠️ Campos de login não encontrados (talvez já logado)")
+                print("⚠️ Login não necessário ou campos não encontrados")
 
             time.sleep(8)
 
-            print_step("4 - Entrando no iframe Spribe")
+            print_step("4 - Trocando aba + procurando iframe")
             if len(driver.window_handles) > 1:
                 driver.switch_to.window(driver.window_handles[-1])
-            for f in driver.find_elements(By.TAG_NAME, "iframe"):
-                src = (f.get_attribute("src") or "").lower()
-                if "spribe" in src or "spribegaming" in src:
-                    driver.switch_to.frame(f)
-                    print("✅ Entrou no iframe!")
-                    break
+                print("✅ Trocou para nova aba")
 
-            print_step("5 - Aguardando payouts aparecerem")
+            # BUSCA MELHORADA DO IFRAME (exatamente como você mandou)
+            iframe_el = None
+            print("   Procurando iframe Spribe...")
+            for f in driver.find_elements(By.TAG_NAME, "iframe"):
+                try:
+                    src = (f.get_attribute("src") or "").lower()
+                    class_name = (f.get_attribute("class") or "").lower()
+                    print(f"   Candidato iframe: src={src[:80]}... class={class_name}")
+                    if ("launch.spribegaming.com" in src or 
+                        "aviator-next.spribegaming.com" in src or 
+                        "spribe" in src or 
+                        "spribe-iframe" in class_name or 
+                        "game-iframe" in class_name):
+                        iframe_el = f
+                        print("   ✅ Iframe Spribe encontrado!")
+                        break
+                except:
+                    continue
+
+            if iframe_el:
+                driver.switch_to.frame(iframe_el)
+                print("✅ Entrou no iframe Spribe com sucesso!")
+            else:
+                print("❌ Nenhum iframe Spribe encontrado!")
+                raise RuntimeError("Iframe não localizado")
+
+            print_step("5 - Aguardando payouts aparecerem (loop com logs)")
             start_time = time.time()
-            while time.time() - start_time < 90:
+            attempt = 0
+            while time.time() - start_time < 120:
+                attempt += 1
                 if page_shows_rate_limit(driver):
-                    print("⚠️ RATE LIMIT detectado no aguardo inicial")
+                    print(f"⚠️ RATE LIMIT detectado na tentativa {attempt}")
                     time.sleep(15)
                     continue
-                if safe_find_elements(driver, "div.payouts-block div.payout"):
-                    print("✅ Payouts encontrados!")
+
+                payouts = safe_find_elements(driver, "div.payouts-block div.payout, div.payout")
+                print(f"   Tentativa {attempt} - Encontrados {len(payouts)} payouts")
+
+                if payouts and len(payouts) > 0:
+                    print("✅ PAYOUTS ENCONTRADOS! Indo para coleta...")
                     break
-                time.sleep(3)
+
+                if attempt % 3 == 0:
+                    print("   Ainda aguardando payouts... (timeout em andamento)")
+                time.sleep(4)
 
             print_step("6 - Conectado! Coletando histórico inicial")
             historico = coletar_historico_dom(driver)
             with _history_lock:
                 global_history = historico[:]
-            print(f"✅ Histórico inicial carregado: {len(historico)} itens")
+            print(f"✅ Histórico inicial carregado com {len(historico)} itens!")
 
-            # ===================== LOOP PRINCIPAL (15-25s) =====================
+            # ===================== LOOP PRINCIPAL =====================
             while True:
                 print_step("LOOP - Verificando novo histórico (15-25s)")
-                
                 if page_shows_rate_limit(driver):
-                    print("⚠️ RATE LIMIT DETECTADO no loop")
+                    print("⚠️ RATE LIMIT no loop principal")
                     sleep_time = backoff + random.uniform(5, 15)
-                    print(f"   Dormindo {int(sleep_time)} segundos...")
+                    print(f"   Dormindo {int(sleep_time)}s...")
                     time.sleep(sleep_time)
                     backoff = min(600, backoff * 1.5)
                     continue
@@ -197,7 +226,7 @@ def iniciar_scraper():
                 novos = coletar_historico_dom(driver)
 
                 if novos and (not historico or novos[0] != historico[0]):
-                    print(f"🔄 NOVO HISTÓRICO DETECTADO! Último: {novos[0]:.2f}x")
+                    print(f"🔄 NOVO VALOR DETECTADO! Último: {novos[0]:.2f}x")
                     added = False
                     with _history_lock:
                         for v in novos:
@@ -211,10 +240,9 @@ def iniciar_scraper():
                         print(f"   Histórico atualizado (50): {lista}")
                         send_telegram_text(f"📊 **EBET AVIATOR - ÚLTIMOS 50**\n[{lista}]\nÚltimo: *{global_history[0]:.2f}x*")
                         screenshot_and_send(driver, "Histórico atualizado")
-
                     historico = novos[:]
 
-                print(f"⏳ Aguardando próxima verificação em 15-25 segundos...")
+                print("⏳ Aguardando próxima verificação em 15-25 segundos...")
                 time.sleep(15 + random.uniform(5, 10))
 
         except Exception as e:
@@ -228,20 +256,19 @@ def iniciar_scraper():
             if driver:
                 try:
                     driver.quit()
-                    print("🔌 Driver fechado com sucesso")
+                    print("🔌 Driver fechado")
                 except:
                     pass
             time.sleep(5)
 
 
-# ===================== SUPERVISOR =====================
 def supervisor_thread():
     while True:
         worker = threading.Thread(target=iniciar_scraper, daemon=True)
         worker.start()
         print("✅ Supervisor: Worker iniciado")
         worker.join()
-        print("⚠️ Worker morreu - reiniciando em 10 segundos...")
+        print("⚠️ Worker morreu - reiniciando em 10s...")
         time.sleep(10)
 
 
@@ -252,7 +279,7 @@ def api_history():
 
 @app.route("/")
 def home():
-    return "EBET AVIATOR - LOGS NO CONSOLE ATIVADOS"
+    return "EBET AVIATOR - LOGS NO CONSOLE + IFRAME CORRIGIDO"
 
 if __name__ == "__main__":
     threading.Thread(target=supervisor_thread, daemon=True).start()
