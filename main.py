@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - EBET Aviator SIMPLES + ACUMULADO DIFERENTE (só adiciona novo no topo, tira antigo)
+# main.py - EBET Aviator SIMPLES + ACUMULADO DIFERENTE + CORRIGIDO
 
 import os
 import time
@@ -25,8 +25,9 @@ URL = "https://ebet.co.mz/games/go/spribe?id=aviator"
 
 app = Flask(__name__)
 
-historico_atual = []      # o que está na tela agora (snapshot)
-historico_acumulado = []  # acumula até 50 (novo no topo, remove antigo do final)
+historico_atual = []      # snapshot da tela agora
+historico_acumulado = []  # acumula até 50 (novo no topo, remove antigo)
+_history_lock = threading.Lock()  # ← CORRIGIDO AQUI (faltava isso!)
 _last_telegram = 0
 
 def send_telegram_text(msg, throttle=20):
@@ -162,32 +163,31 @@ def iniciar_scraper():
             print("   Histórico apareceu!")
 
             historico_atual = coletar_historico(driver)
-            historico_acumulado = historico_atual[:]  # inicia acumulado com o atual
+            historico_acumulado = historico_atual[:]  # inicia acumulado
             print(f"   Histórico atual: {historico_atual[:10]}...")
 
-            # LOOP PRINCIPAL - simples e lento
+            # LOOP PRINCIPAL
             while True:
                 novos = coletar_historico(driver)
 
                 if novos and (not historico_atual or novos[0] != historico_atual[0]):
                     novo_valor = novos[0]
-                    print(f"   NOVO VALOR DETECTADO: {novo_valor:.2f}x")
+                    print(f"   NOVO VALOR: {novo_valor:.2f}x")
 
-                    # Estratégia diferente: adiciona só o novo no topo, remove antigo se >50
+                    # Estratégia: adiciona novo no topo, remove antigo se >50
                     with _history_lock:
                         if not historico_acumulado or novo_valor != historico_acumulado[0]:
                             historico_acumulado.insert(0, novo_valor)
                             if len(historico_acumulado) > 50:
-                                historico_acumulado.pop()  # remove o último (mais antigo)
+                                historico_acumulado.pop()  # remove o mais antigo
 
                     # Envia só os últimos 10 + o novo
                     lista = ", ".join(f"{v:.2f}x" for v in historico_acumulado[:10])
                     send_telegram_text(f"📊 EBET AVIATOR\n[{lista}]\nNovo: *{novo_valor:.2f}x*", throttle=20)
-                    screenshot_and_send(driver, "Novo resultado")
 
                     historico_atual = novos[:]
 
-                time.sleep(random.uniform(20, 40))  # lento pra evitar ban
+                time.sleep(random.uniform(20, 40))
 
         except Exception as e:
             print(f"❌ ERRO: {type(e).__name__} - {e}")
