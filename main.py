@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - EBET Aviator + IFRAME EXATO (provider-game-iframe) + PRINT EM TODO PASSO
+# main.py - EBET Aviator (baseado no código que funcionou) + Railway + Histórico 50
 
 import os
 import sys
@@ -16,20 +16,21 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import StaleElementReferenceException
 
 # ================= CONFIG =================
 TELEGRAM_TOKEN = "8742776802:AAHSzD1qTwCqMEOdoW9_pT2l5GfmMBWUZQY"
 TELEGRAM_CHAT_ID = "7427648935"
 PHONE = "857789345"
 PASSWORD = "max123ZICO"
-HOME_URL = "https://ebet.co.mz/"
+URL = "https://ebet.co.mz/games/go/spribe?id=aviator"
 
 app = Flask(__name__)
 
-historico = []
-global_history = []
+historico = []           # snapshot atual
+global_history = []      # acumula até 50
 _history_lock = threading.Lock()
 _last_telegram = 0
 
@@ -53,13 +54,13 @@ def screenshot_and_send(driver, label):
         driver.save_screenshot(path)
         send_telegram_text(f"📸 {label}")
         print(f"   📸 Screenshot enviado: {label}")
-    except Exception as e:
-        print(f"   ❌ Falha ao enviar screenshot: {e}")
+    except:
+        pass
 
 def print_step(step):
-    print(f"\n{'='*85}")
+    print(f"\n{'='*80}")
     print(f"🚀 PASSO: {step}")
-    print(f"{'='*85}")
+    print(f"{'='*80}")
     send_telegram_text(f"📍 {step}")
 
 def safe_find_elements(driver, selector):
@@ -70,25 +71,28 @@ def safe_find_elements(driver, selector):
             time.sleep(0.4)
     return []
 
-def click_aviator_image(driver):
-    print("   Procurando imagem do Aviator...")
-    for img in safe_find_elements(driver, "img.landing-page__item-image"):
-        try:
+def clicar_aviator(driver, wait):
+    print_step("Clicando na imagem do Aviator")
+    try:
+        imgs = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "img.landing-page__item-image")))
+        for img in imgs:
             src = (img.get_attribute("src") or "").lower()
             if "aviator" in src:
                 driver.execute_script("arguments[0].click();", img)
-                print("   ✅ Clique na imagem Aviator executado!")
+                print("   ✅ Clique Aviator executado!")
                 screenshot_and_send(driver, "Clique Aviator OK")
                 return True
-        except:
-            continue
-    print("   ⚠️ Imagem Aviator não encontrada")
-    screenshot_and_send(driver, "Falha - Imagem Aviator não encontrada")
-    return False
+        print("   ⚠️ Imagem Aviator não encontrada")
+        screenshot_and_send(driver, "Falha - Imagem Aviator não encontrada")
+        return False
+    except Exception as e:
+        print(f"   Erro ao clicar Aviator: {e}")
+        screenshot_and_send(driver, "Falha - Clicar Aviator")
+        return False
 
 def coletar_historico_dom(driver):
     vals = []
-    for el in safe_find_elements(driver, "div.payouts-block div.payout, div.payout"):
+    for el in safe_find_elements(driver, "div.payout"):
         try:
             m = re.search(r"(\d+\.?\d*)", el.text.strip())
             if m:
@@ -127,84 +131,71 @@ def iniciar_scraper():
         try:
             print_step("INICIANDO NOVO CICLO")
             driver = start_driver()
+            wait = WebDriverWait(driver, 60)
 
-            print_step("1 - Abrindo Home EBET")
-            driver.get(HOME_URL)
+            print_step("1 - Abrindo URL")
+            driver.get(URL)
             time.sleep(8)
-            screenshot_and_send(driver, "1 - Home EBET aberta")
+            screenshot_and_send(driver, "1 - Página aberta")
 
-            print_step("2 - Clicando Aviator (1ª vez)")
-            click_aviator_image(driver)
+            clicar_aviator(driver, wait)
             time.sleep(5)
 
             print_step("3 - Fazendo Login")
-            try:
-                phone = driver.find_element(By.ID, "phone-input")
-                phone.clear()
-                phone.send_keys(PHONE)
-                password = driver.find_element(By.ID, "password-input")
-                password.clear()
-                password.send_keys(PASSWORD)
-                btn = driver.find_element(By.CSS_SELECTOR, "input.btn.btn-primary.btn-session")
-                driver.execute_script("arguments[0].click();", btn)
-                screenshot_and_send(driver, "3 - Login enviado com sucesso")
-                print("✅ Login enviado")
-            except Exception as e:
-                screenshot_and_send(driver, "3 - Falha no Login")
-                print("⚠️ Falha no login:", e)
+            phone = wait.until(EC.presence_of_element_located((By.ID, "phone-input")))
+            phone.clear()
+            phone.send_keys(PHONE)
+            password = driver.find_element(By.ID, "password-input")
+            password.clear()
+            password.send_keys(PASSWORD)
+            btn = driver.find_element(By.CSS_SELECTOR, "input.btn-session")
+            driver.execute_script("arguments[0].click();", btn)
+            screenshot_and_send(driver, "3 - Login enviado")
+            print("✅ Login enviado")
+            time.sleep(7)
 
+            clicar_aviator(driver, wait)
             time.sleep(8)
 
-            print_step("4 - Clicando Aviator (2ª vez)")
-            click_aviator_image(driver)
-            time.sleep(6)
+            print_step("5 - Trocando aba se necessário")
+            if len(driver.window_handles) > 1:
+                driver.switch_to.window(driver.window_handles[-1])
+                print("✅ Mudou para aba do jogo")
+                screenshot_and_send(driver, "5 - Aba trocada")
 
-            print_step("5 - Entrando no iframe (provider-game-iframe)")
-            iframe_el = None
-            for f in driver.find_elements(By.TAG_NAME, "iframe"):
-                try:
-                    src = (f.get_attribute("src") or "").lower()
-                    class_name = (f.get_attribute("class") or "").lower()
-                    id_name = (f.get_attribute("id") or "").lower()
+            print_step("6 - Entrando no iframe externo (spribe)")
+            iframe1 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='spribe']")))
+            driver.switch_to.frame(iframe1)
+            screenshot_and_send(driver, "6 - Iframe externo OK")
+            print("✅ Iframe externo OK")
+            time.sleep(5)
 
-                    if id_name == "provider-game-iframe" or "spribe-iframe" in class_name or "launch.spribegaming.com" in src:
-                        iframe_el = f
-                        print("   ✅ IFRAME EXATO ENCONTRADO!")
-                        screenshot_and_send(driver, "5 - Iframe encontrado")
-                        break
-                except:
-                    continue
+            print_step("7 - Entrando no iframe interno (spribegaming)")
+            iframe2 = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "iframe[src*='spribegaming']")))
+            driver.switch_to.frame(iframe2)
+            screenshot_and_send(driver, "7 - Iframe interno OK")
+            print("✅ Entrou no iframe do Aviator!")
+            time.sleep(8)
 
-            if iframe_el:
-                driver.switch_to.frame(iframe_el)
-                print("✅ Entrou no iframe com sucesso!")
-                screenshot_and_send(driver, "5 - Entrou no iframe")
-            else:
-                screenshot_and_send(driver, "5 - Falha - Iframe não encontrado")
-                raise RuntimeError("Iframe não localizado")
-
-            print_step("6 - Aguardando e capturando histórico")
-            start_time = time.time()
-            while time.time() - start_time < 90:
-                payouts = safe_find_elements(driver, "div.payouts-block div.payout, div.payout")
-                print(f"   Tentativa → {len(payouts)} payouts")
-                if len(payouts) > 0:
-                    print("✅ PAYOUTS ENCONTRADOS!")
-                    screenshot_and_send(driver, "6 - Payouts encontrados")
-                    break
-                time.sleep(4)
+            print_step("8 - Aguardando histórico")
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.payout")))
+            screenshot_and_send(driver, "8 - Histórico apareceu")
 
             historico = coletar_historico_dom(driver)
             with _history_lock:
                 global_history = historico[:]
-            print(f"✅ Histórico inicial carregado: {len(historico)} itens")
-            screenshot_and_send(driver, "6 - Histórico inicial OK")
+            print(f"✅ Histórico inicial: {len(historico)} itens")
+            screenshot_and_send(driver, "8 - Histórico inicial OK")
 
-            # LOOP PRINCIPAL
+            # LOOP MONITORAMENTO
             while True:
                 print_step("LOOP - Verificando novo histórico")
-                novos = coletar_historico_dom(driver)
+                if page_shows_rate_limit(driver):
+                    print("⚠️ RATE LIMIT detectado")
+                    time.sleep(backoff + random.uniform(5, 15))
+                    continue
 
+                novos = coletar_historico_dom(driver)
                 if novos and (not historico or novos[0] != historico[0]):
                     print(f"🔄 NOVO HISTÓRICO! Último: {novos[0]:.2f}x")
                     with _history_lock:
@@ -219,14 +210,14 @@ def iniciar_scraper():
                     screenshot_and_send(driver, "Histórico atualizado")
                     historico = novos[:]
 
-                print("⏳ Aguardando próxima verificação (15-25s)...")
+                print("⏳ Aguardando 15-25s...")
                 time.sleep(15 + random.uniform(5, 10))
 
         except Exception as e:
             print(f"❌ ERRO: {type(e).__name__} - {e}")
             traceback.print_exc()
             send_telegram_text(f"🔥 ERRO: {type(e).__name__}")
-            screenshot_and_send(driver, "ERRO - Falha geral")
+            screenshot_and_send(driver, "ERRO GERAL")
             time.sleep(15)
 
         finally:
@@ -256,7 +247,7 @@ def api_history():
 
 @app.route("/")
 def home():
-    return "EBET AVIATOR - IFRAME EXATO + PRINT EM TODO PASSO"
+    return "EBET AVIATOR - Código que funcionou adaptado para Railway"
 
 if __name__ == "__main__":
     threading.Thread(target=supervisor_thread, daemon=True).start()
