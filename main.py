@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - EBET Aviator + LOGS NO CONSOLE + IFRAME CORRIGIDO + HISTÓRICO 50
+# main.py - EBET Aviator + IFRAME CORRIGIDO (bitville + spribe) + LOGS COMPLETOS
 
 import os
 import sys
@@ -16,11 +16,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import (
-    StaleElementReferenceException,
-    NoSuchElementException,
-    WebDriverException,
-)
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.support.ui import WebDriverWait
 
 # ================= CONFIG =================
@@ -66,15 +62,15 @@ def print_step(step):
     send_telegram_text(f"📍 {step}")
 
 def safe_find_elements(driver, selector):
-    for _ in range(4):
+    for _ in range(5):
         try:
             return driver.find_elements(By.CSS_SELECTOR, selector)
         except:
-            time.sleep(0.3)
+            time.sleep(0.4)
     return []
 
 def click_aviator_if_found(driver):
-    print("   Procurando imagem do Aviator na página...")
+    print("   Procurando imagem do Aviator...")
     for img in safe_find_elements(driver, "img.landing-page__item-image"):
         try:
             src = (img.get_attribute("src") or "").lower()
@@ -85,7 +81,7 @@ def click_aviator_if_found(driver):
                 return True
         except:
             continue
-    print("   ⚠️ Imagem do Aviator não encontrada")
+    print("   ⚠️ Imagem Aviator não encontrada")
     return False
 
 def coletar_historico_dom(driver):
@@ -150,107 +146,97 @@ def iniciar_scraper():
                 screenshot_and_send(driver, "Login enviado")
                 print("✅ Login enviado com sucesso")
             except:
-                print("⚠️ Login não necessário ou campos não encontrados")
+                print("⚠️ Login já feito ou campos não encontrados")
 
             time.sleep(8)
 
-            print_step("4 - Trocando aba + procurando iframe")
+            print_step("4 - Procurando e entrando no iframe (bitville + spribe)")
             if len(driver.window_handles) > 1:
                 driver.switch_to.window(driver.window_handles[-1])
                 print("✅ Trocou para nova aba")
 
-            # BUSCA MELHORADA DO IFRAME (exatamente como você mandou)
             iframe_el = None
-            print("   Procurando iframe Spribe...")
+            print("   Buscando iframe Spribe / Bitville...")
             for f in driver.find_elements(By.TAG_NAME, "iframe"):
                 try:
                     src = (f.get_attribute("src") or "").lower()
                     class_name = (f.get_attribute("class") or "").lower()
-                    print(f"   Candidato iframe: src={src[:80]}... class={class_name}")
+                    id_name = (f.get_attribute("id") or "").lower()
+                    print(f"   Candidato: id={id_name} | class={class_name} | src={src[:90]}...")
+
                     if ("launch.spribegaming.com" in src or 
                         "aviator-next.spribegaming.com" in src or 
+                        "games-interface.bitville-api.com" in src or 
                         "spribe" in src or 
                         "spribe-iframe" in class_name or 
-                        "game-iframe" in class_name):
+                        "game-iframe" in class_name or 
+                        "provider-game-iframe" in id_name):
                         iframe_el = f
-                        print("   ✅ Iframe Spribe encontrado!")
+                        print("   ✅ IFRAME ENCONTRADO!")
                         break
                 except:
                     continue
 
             if iframe_el:
                 driver.switch_to.frame(iframe_el)
-                print("✅ Entrou no iframe Spribe com sucesso!")
+                print("✅ Entrou no iframe com sucesso!")
             else:
-                print("❌ Nenhum iframe Spribe encontrado!")
+                print("❌ Nenhum iframe encontrado após 1 tentativa")
                 raise RuntimeError("Iframe não localizado")
 
-            print_step("5 - Aguardando payouts aparecerem (loop com logs)")
+            print_step("5 - Aguardando payouts (com logs a cada tentativa)")
             start_time = time.time()
             attempt = 0
             while time.time() - start_time < 120:
                 attempt += 1
-                if page_shows_rate_limit(driver):
-                    print(f"⚠️ RATE LIMIT detectado na tentativa {attempt}")
-                    time.sleep(15)
-                    continue
-
                 payouts = safe_find_elements(driver, "div.payouts-block div.payout, div.payout")
-                print(f"   Tentativa {attempt} - Encontrados {len(payouts)} payouts")
+                print(f"   Tentativa {attempt} → {len(payouts)} payouts encontrados")
 
-                if payouts and len(payouts) > 0:
-                    print("✅ PAYOUTS ENCONTRADOS! Indo para coleta...")
+                if len(payouts) > 0:
+                    print("✅ PAYOUTS ENCONTRADOS!")
                     break
-
-                if attempt % 3 == 0:
-                    print("   Ainda aguardando payouts... (timeout em andamento)")
+                if page_shows_rate_limit(driver):
+                    print("⚠️ Rate limit detectado")
+                    time.sleep(10)
                 time.sleep(4)
 
-            print_step("6 - Conectado! Coletando histórico inicial")
+            print_step("6 - Coletando histórico inicial")
             historico = coletar_historico_dom(driver)
             with _history_lock:
                 global_history = historico[:]
-            print(f"✅ Histórico inicial carregado com {len(historico)} itens!")
+            print(f"✅ Histórico inicial carregado: {len(historico)} itens")
 
-            # ===================== LOOP PRINCIPAL =====================
+            # LOOP PRINCIPAL
             while True:
-                print_step("LOOP - Verificando novo histórico (15-25s)")
+                print_step("LOOP - Verificando novo histórico")
                 if page_shows_rate_limit(driver):
-                    print("⚠️ RATE LIMIT no loop principal")
-                    sleep_time = backoff + random.uniform(5, 15)
-                    print(f"   Dormindo {int(sleep_time)}s...")
-                    time.sleep(sleep_time)
-                    backoff = min(600, backoff * 1.5)
+                    print("⚠️ RATE LIMIT no loop")
+                    time.sleep(backoff + random.uniform(5, 15))
                     continue
 
                 novos = coletar_historico_dom(driver)
-
                 if novos and (not historico or novos[0] != historico[0]):
-                    print(f"🔄 NOVO VALOR DETECTADO! Último: {novos[0]:.2f}x")
-                    added = False
+                    print(f"🔄 NOVO HISTÓRICO! Último: {novos[0]:.2f}x")
                     with _history_lock:
                         for v in novos:
                             if v not in global_history:
                                 global_history.insert(0, v)
-                                added = True
                         if len(global_history) > 50:
                             global_history = global_history[:50]
-                    if added:
-                        lista = ", ".join(f"{v:.2f}x" for v in global_history[:20])
-                        print(f"   Histórico atualizado (50): {lista}")
-                        send_telegram_text(f"📊 **EBET AVIATOR - ÚLTIMOS 50**\n[{lista}]\nÚltimo: *{global_history[0]:.2f}x*")
-                        screenshot_and_send(driver, "Histórico atualizado")
+                    lista = ", ".join(f"{v:.2f}x" for v in global_history[:20])
+                    print(f"   Histórico atualizado: {lista}")
+                    send_telegram_text(f"📊 **EBET AVIATOR - ÚLTIMOS 50**\n[{lista}]\nÚltimo: *{global_history[0]:.2f}x*")
+                    screenshot_and_send(driver, "Histórico atualizado")
                     historico = novos[:]
 
-                print("⏳ Aguardando próxima verificação em 15-25 segundos...")
+                print("⏳ Aguardando próxima checagem (15-25s)...")
                 time.sleep(15 + random.uniform(5, 10))
 
         except Exception as e:
-            print(f"❌ ERRO GERAL: {type(e).__name__} - {e}")
+            print(f"❌ ERRO: {type(e).__name__} - {e}")
             traceback.print_exc()
             send_telegram_text(f"🔥 ERRO: {type(e).__name__}")
             time.sleep(15)
-            backoff = min(600, backoff * 2)
 
         finally:
             if driver:
@@ -279,7 +265,7 @@ def api_history():
 
 @app.route("/")
 def home():
-    return "EBET AVIATOR - LOGS NO CONSOLE + IFRAME CORRIGIDO"
+    return "EBET AVIATOR - IFRAME CORRIGIDO (bitville + spribe)"
 
 if __name__ == "__main__":
     threading.Thread(target=supervisor_thread, daemon=True).start()
